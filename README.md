@@ -110,7 +110,8 @@ Requirements: Docker (with Compose) and the AOL query dataset.
 
 ### 1. Get the dataset
 
-This project uses the AOL query log (Kaggle: "AOL User Session Collection").
+This project uses the AOL query log, available on Kaggle:
+[AOL User Session Collection 500k](https://www.kaggle.com/datasets/dineshydv/aol-user-session-collection-500k?resource=download).
 Download it and unzip it. You will get tab-separated files named
 `user-ct-test-collection-NN.txt`.
 

@@ -8,7 +8,7 @@ The interesting part is not the feature list. It is one fact that shapes every d
 
 ## 2. Dataset
 
-I am using the AOL query log (the Kaggle "AOL User Session Collection" version). It is about 20 million real search events from roughly 650k users over three months in 2006. It is the only large public dataset that is actually raw human search queries with enough volume to look real.
+I am using the AOL query log (the Kaggle ["AOL User Session Collection 500k"](https://www.kaggle.com/datasets/dineshydv/aol-user-session-collection-500k?resource=download) version). It is about 20 million real search events from roughly 650k users over three months in 2006. It is the only large public dataset that is actually raw human search queries with enough volume to look real.
 
 The raw log is one row per search event, with user IDs, timestamps, and clicked URLs. I only want the query text, so ingestion strips everything else. A note on the AOL log: it was withdrawn in 2006 over a privacy problem, because the user-level data could be de-anonymized. That does not affect this project, because I discard every user-identifying column and keep only the query string. The README says this explicitly.
 

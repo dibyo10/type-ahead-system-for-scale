@@ -9,5 +9,36 @@ services:
       - "5433:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U typeahead"]
+      interval: 2s
+      timeout: 3s
+      retries: 10
+
+  ingest:
+    build:
+      context: .
+      target: ingest
+    environment:
+      DATABASE_URL: "postgres://typeahead:typeahead@postgres:5432/typeahead?sslmode=disable"
+    volumes:
+      - ./data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    profiles: ["tools"]   # only runs when explicitly invoked, not on `up`
+
+  server:
+    build:
+      context: .
+      target: server
+    environment:
+      DATABASE_URL: "postgres://typeahead:typeahead@postgres:5432/typeahead?sslmode=disable"
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
 volumes:
   pgdata:

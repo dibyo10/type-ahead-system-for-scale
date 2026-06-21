@@ -15,7 +15,11 @@ import (
 
 func main(){
 	filePath := flag.String("file", "", "path to AOL collection .txt file")
-	connStr := flag.String("db", "postgres://typeahead:typeahead@localhost:5433/typeahead?sslmode=disable", "postgres connection string")
+	defaultDB := os.Getenv("DATABASE_URL")
+	if defaultDB == "" {
+		defaultDB = "postgres://typeahead:typeahead@localhost:5433/typeahead?sslmode=disable"
+	}
+	connStr := flag.String("db", defaultDB, "postgres connection string")
 	flag.Parse()
 
 	if *filePath == "" {

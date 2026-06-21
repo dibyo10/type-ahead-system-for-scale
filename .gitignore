@@ -6,6 +6,7 @@
 *.txt
 user-ct-*.txt
 *.zip
+data/
 
 # env / secrets
 .env

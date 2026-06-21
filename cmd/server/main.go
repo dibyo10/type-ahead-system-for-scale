@@ -19,7 +19,10 @@ import (
 
 func main() {
 	ctx := context.Background()
-	connStr := "postgres://typeahead:typeahead@localhost:5433/typeahead?sslmode=disable"
+	connStr := os.Getenv("DATABASE_URL")
+	if connStr == "" {
+		connStr = "postgres://typeahead:typeahead@localhost:5433/typeahead?sslmode=disable"
+	}
 
 	
 	st, err := store.New(ctx, connStr)

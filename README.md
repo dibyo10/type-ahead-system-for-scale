@@ -103,38 +103,53 @@ free and to defer and batch the write cost.
 
 ## Setup
 
-Requirements: Go 1.22+, Docker (for Postgres), and the AOL query dataset.
+Everything runs in Docker — Postgres, ingestion, and the server. You do not need
+Go installed to run it; the binaries are built inside the image.
 
-### 1. Start Postgres
+Requirements: Docker (with Compose) and the AOL query dataset.
 
-```
-docker compose up -d
-```
-
-Postgres runs on host port **5433** (not the default 5432) to avoid colliding
-with any local Postgres install. The connection string in the code already uses
-5433.
-
-### 2. Get the dataset
+### 1. Get the dataset
 
 This project uses the AOL query log (Kaggle: "AOL User Session Collection").
 Download it and unzip it. You will get tab-separated files named
 `user-ct-test-collection-NN.txt`.
+
+Create a `data/` folder and put the file in it:
+
+```
+mkdir -p data
+mv user-ct-test-collection-02.txt data/
+```
+
+The `data/` folder is mounted into the ingest container, so the container sees
+the file at `/data/user-ct-test-collection-02.txt`.
 
 The dataset is **not** committed to this repo: it is large and, given the AOL
 log's history, not ours to redistribute. Only the query text is used; all
 user-identifying columns (user ID, timestamps, clicked URLs) are discarded
 during ingestion.
 
+### 2. Start Postgres
+
+```
+docker compose up -d postgres
+```
+
+Postgres runs on host port **5433** (not the default 5432) to avoid colliding
+with any local Postgres install. A healthcheck makes the ingest and server
+containers wait until it is genuinely ready before they connect.
+
 ### 3. Ingest the data
 
 ```
-go run ./cmd/ingest -file=user-ct-test-collection-02.txt
+docker compose run --rm ingest -file=/data/user-ct-test-collection-02.txt
 ```
 
-This reads the file, normalizes queries (lowercase, trim, drop empty/`-`
-placeholders), aggregates counts in memory, and bulk-loads `query, count` into
-Postgres. One file yields ~1.24M unique queries.
+`ingest` is a one-time job (it does **not** start on a normal `up` — it sits
+behind a Compose profile). Note the path is the container's view of the mounted
+folder, `/data/...`, not the host path. It reads the file, normalizes queries
+(lowercase, trim, drop empty/`-` placeholders), aggregates counts in memory, and
+bulk-loads `query, count` into Postgres. One file yields ~1.24M unique queries.
 
 Counting note: every appearance of a query in the log counts toward its
 popularity (a query with multiple clicked-result rows counts each row). This is
@@ -144,10 +159,11 @@ DESIGN.md for why.
 ### 4. Run the server
 
 ```
-go run ./cmd/server
+docker compose up --build server
 ```
 
-It loads Postgres into the trie at startup, then serves on **:8080**.
+This builds the server image and runs it. It loads Postgres into the trie at
+startup (~8s for 1.24M queries), then serves on **:8080**.
 
 ### 5. Open the UI
 
@@ -155,6 +171,15 @@ Visit **http://localhost:8080/** in a browser. Type a prefix (try `goog`, `map`,
 `ebay`), use arrow keys to navigate, Enter or the Search button to submit. The
 panel shows what each request did: latency, cache hit/miss, owning node, and the
 write-buffer stats.
+
+To stop everything: `docker compose down` (add `-v` to also wipe the Postgres
+volume for a fully clean slate).
+
+> The connection string is configurable via the `DATABASE_URL` environment
+> variable (set automatically in `docker-compose.yml`). It falls back to
+> `localhost:5433` when unset, so `go run ./cmd/server` and
+> `go run ./cmd/ingest` still work against the Compose Postgres if you prefer a
+> local Go toolchain.
 
 ## API
 
@@ -183,6 +208,9 @@ curl "http://localhost:8080/cache/debug?prefix=goog"
 ```
 
 ## Demonstrations
+
+These optional utilities run on the host and need a local Go toolchain (1.25+).
+They talk to the Compose Postgres over the exposed `localhost:5433` port.
 
 ### Consistent hashing
 

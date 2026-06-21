@@ -2,18 +2,18 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
+	"typeahead/internal/api"
 	"typeahead/internal/buffer"
 	"typeahead/internal/cache"
 	"typeahead/internal/store"
+	"typeahead/internal/trending"
 	"typeahead/internal/trie"
 )
 
@@ -45,79 +45,21 @@ func main() {
 
 	
 	buf := buffer.New(st, 1000, 5*time.Second)
-
 	
 	c := cache.New(3, 100, 60*time.Second)
+	
+	
+	tr := trending.New(30 * time.Second)
 
 	
-	mux := http.NewServeMux()
-
-	mux.HandleFunc("GET /suggest", func(w http.ResponseWriter, r *http.Request) {
-		prefix := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
-
-		
-		if suggestions, hit := c.Get(prefix); hit {
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(suggestions)
-			return
-		}
-
-		
-		suggestions := t.Search(prefix)
-		if suggestions == nil {
-			suggestions = []trie.Suggestion{}
-		}
-		c.Set(prefix, suggestions) 
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(suggestions)
-	})
-
-	mux.HandleFunc("POST /search", func(w http.ResponseWriter, r *http.Request) {
-		var body struct {
-			Query string `json:"query"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			http.Error(w, "bad request", http.StatusBadRequest)
-			return
-		}
-		query := strings.ToLower(strings.TrimSpace(body.Query))
-		if query == "" {
-			http.Error(w, "empty query", http.StatusBadRequest)
-			return
-		}
-
-		buf.Add(query)
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"message": "Searched"})
-	})
-
-	mux.HandleFunc("GET /stats", func(w http.ResponseWriter, r *http.Request) {
-		adds, flushes, writes := buf.Stats()
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]int{
-			"searches_received": adds,
-			"db_flushes":        flushes,
-			"rows_written":      writes,
-		})
-	})
-
-	mux.HandleFunc("GET /cache/debug", func(w http.ResponseWriter, r *http.Request) {
-		prefix := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("prefix")))
-		owner, hit := c.Debug(prefix)
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
-			"prefix": prefix,
-			"node":   owner,
-			"hit":    hit,
-		})
-	})
-
-	mux.HandleFunc("GET /cache/stats", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(c.AllStats())
-	})
+	apiHandler := &api.API{
+		Trie:     t,
+		Cache:    c,
+		Buffer:   buf,
+		Trending: tr,
+		Weight:   5000.0,
+	}
+	mux := apiHandler.Routes()
 
 	
 	srv := &http.Server{Addr: ":8080", Handler: mux}

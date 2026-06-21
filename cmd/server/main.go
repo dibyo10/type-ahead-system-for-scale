@@ -60,6 +60,7 @@ func main() {
 		Weight:   5000.0,
 	}
 	mux := apiHandler.Routes()
+	mux.Handle("/", http.FileServer(http.Dir("web")))
 
 	
 	srv := &http.Server{Addr: ":8080", Handler: mux}

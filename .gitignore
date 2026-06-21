@@ -1,0 +1,15 @@
+# Go
+/typeahead          # compiled binary if you build one
+*.exe
+
+# the dataset, it's huge and not yours to redistribute
+*.txt
+user-ct-*.txt
+*.zip
+
+# env / secrets
+.env
+
+# editor
+.vscode/
+.idea/

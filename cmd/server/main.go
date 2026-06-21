@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"typeahead/internal/buffer"
+	"typeahead/internal/cache"
 	"typeahead/internal/store"
 	"typeahead/internal/trie"
 )
@@ -20,14 +21,14 @@ func main() {
 	ctx := context.Background()
 	connStr := "postgres://typeahead:typeahead@localhost:5433/typeahead?sslmode=disable"
 
-	// --- connect to Postgres (source of truth) ---
+	
 	st, err := store.New(ctx, connStr)
 	if err != nil {
 		log.Fatalf("store: %v", err)
 	}
 	defer st.Close()
 
-	// --- build the trie from Postgres at startup ---
+	
 	t := trie.New(10)
 	start := time.Now()
 	loaded := 0
@@ -42,21 +43,31 @@ func main() {
 	t.Build()
 	log.Printf("loaded %d queries, built trie in %s", loaded, time.Since(start))
 
-	// --- write buffer: batches search submissions before hitting Postgres ---
-	// flush every 5s OR when 1000 distinct queries pile up, whichever first.
+	
 	buf := buffer.New(st, 1000, 5*time.Second)
 
-	// --- HTTP routes ---
+	
+	c := cache.New(3, 100, 60*time.Second)
+
+	
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /suggest", func(w http.ResponseWriter, r *http.Request) {
-		// lowercase so "IP" and "ip" hit the same lowercase trie path
 		prefix := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
 
+		
+		if suggestions, hit := c.Get(prefix); hit {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(suggestions)
+			return
+		}
+
+		
 		suggestions := t.Search(prefix)
 		if suggestions == nil {
-			suggestions = []trie.Suggestion{} // return [] not null in JSON
+			suggestions = []trie.Suggestion{}
 		}
+		c.Set(prefix, suggestions) 
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(suggestions)
@@ -76,8 +87,6 @@ func main() {
 			return
 		}
 
-		// Record the search into the buffer (cheap, no DB wait), then return
-		// the dummy response immediately. The real DB write happens later, batched.
 		buf.Add(query)
 
 		w.Header().Set("Content-Type", "application/json")
@@ -94,31 +103,41 @@ func main() {
 		})
 	})
 
-	// --- start the server in a background goroutine ---
-	// We don't use log.Fatal(ListenAndServe(...)) directly anymore, because
-	// that blocks forever and our shutdown/flush code below would never run.
+	mux.HandleFunc("GET /cache/debug", func(w http.ResponseWriter, r *http.Request) {
+		prefix := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("prefix")))
+		owner, hit := c.Debug(prefix)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"prefix": prefix,
+			"node":   owner,
+			"hit":    hit,
+		})
+	})
+
+	mux.HandleFunc("GET /cache/stats", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(c.AllStats())
+	})
+
+	
 	srv := &http.Server{Addr: ":8080", Handler: mux}
 	go func() {
 		log.Println("listening on :8080")
-		// ErrServerClosed is the normal, expected error when we shut down on purpose.
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("server: %v", err)
 		}
 	}()
 
-	// --- wait for Ctrl+C / kill, then shut down cleanly ---
-	// This blocks until the OS sends an interrupt or terminate signal.
+	
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 	<-stop
 	log.Println("shutting down...")
 
-	// Stop accepting new requests, give in-flight ones a moment to finish.
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	srv.Shutdown(shutdownCtx)
 
-	// Final flush of anything still buffered, so we don't lose it on a clean exit.
 	buf.Close()
 	log.Println("bye")
 }
